@@ -79,7 +79,7 @@ For a Vercel-hosted dashboard, add the exact deployment origin (for example `htt
 
 - Never put Xingchi credentials in Zeus, browser storage, `NEXT_PUBLIC_*` variables, or this repository.
 - Configure credentials only in the supported OpenCode provider configuration flow.
-- The bridge token is entered in page memory and is not persisted.
+- The bridge URL and bridge token are persisted in this browser’s `localStorage` so they survive refresh. Use this only in a trusted, private browser profile; clear that browser storage if the device is shared.
 - Keep the bridge bound to loopback; do not expose port 4173 or the OpenCode server directly to the public internet.
 - Set `ZEUS_ALLOWED_ORIGINS` to trusted origins only.
 - Do not commit `.env` or provider credential files.
