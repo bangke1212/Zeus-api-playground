@@ -96,7 +96,7 @@ export default function Home() {
   async function selectProject(value: string) {
     setProject(value); setSession(""); setConversation([]); setFiles([]); setSelectedFile("");
     await loadSessions(value);
-    await loadFiles("");
+    await loadFiles("", value);
   }
 
   async function newSession() {
@@ -131,10 +131,10 @@ export default function Home() {
     } finally { setBusy(""); }
   }
 
-  async function loadFiles(path: string) {
+  async function loadFiles(path: string, projectOverride = project) {
     try {
       const params = new URLSearchParams();
-      if (project) params.set("directory", project);
+      if (projectOverride) params.set("directory", projectOverride);
       if (path) params.set("path", path);
       const data = await api("/opencode/file?" + params.toString());
       const list = Array.isArray(data) ? data : (data.files || []);
