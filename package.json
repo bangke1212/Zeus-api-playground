@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "agent:bridge": "node agent-bridge/server.mjs"
+    "agent:bridge": "node --env-file=.env agent-bridge/server.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
