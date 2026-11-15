@@ -49,18 +49,31 @@ export default function Home() {
   const [providerPanel, setProviderPanel] = useState(false);
 
   useEffect(() => {
+    // Load connection settings independently so a damaged task cache cannot
+    // prevent the bridge address/token from being restored after refresh.
+    try { setBridgeUrl(localStorage.getItem("zeus-bridge-url") || ""); } catch {}
+    try { setBridgeToken(localStorage.getItem("zeus-bridge-token") || ""); } catch {}
     try {
-      setTasks(JSON.parse(localStorage.getItem("zeus-workspace-tasks") || "[]"));
-      setBridgeUrl(localStorage.getItem("zeus-bridge-url") || "");
-      setBridgeToken(localStorage.getItem("zeus-bridge-token") || "");
+      const savedTasks = localStorage.getItem("zeus-workspace-tasks");
+      if (savedTasks) {
+        const parsed = JSON.parse(savedTasks);
+        if (Array.isArray(parsed)) setTasks(parsed);
+      }
     } catch {}
     setCredentialsLoaded(true);
   }, []);
-  useEffect(() => { localStorage.setItem("zeus-workspace-tasks", JSON.stringify(tasks)); }, [tasks]);
+  useEffect(() => {
+    try { localStorage.setItem("zeus-workspace-tasks", JSON.stringify(tasks)); } catch {}
+  }, [tasks]);
   useEffect(() => {
     if (!credentialsLoaded) return;
-    localStorage.setItem("zeus-bridge-url", bridgeUrl);
-    localStorage.setItem("zeus-bridge-token", bridgeToken);
+    // Save both fields locally on every edit; token stays masked by password input.
+    try {
+      localStorage.setItem("zeus-bridge-url", bridgeUrl.trim());
+      localStorage.setItem("zeus-bridge-token", bridgeToken);
+    } catch {
+      setNotice("Browser tidak mengizinkan penyimpanan lokal. Periksa izin storage/private mode.");
+    }
   }, [credentialsLoaded, bridgeUrl, bridgeToken]);
 
   const projectOptions = useMemo(() => projects.map((p, i) => ({
