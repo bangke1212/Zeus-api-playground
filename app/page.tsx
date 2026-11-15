@@ -24,8 +24,9 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const id = () => crypto.randomUUID();
 
 export default function Home() {
-  const [bridgeUrl, setBridgeUrl] = useState("http://127.0.0.1:4173");
+  const [bridgeUrl, setBridgeUrl] = useState("");
   const [bridgeToken, setBridgeToken] = useState("");
+  const [credentialsLoaded, setCredentialsLoaded] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -44,9 +45,19 @@ export default function Home() {
   const [activeView, setActiveView] = useState<"chat" | "files" | "tasks">("chat");
 
   useEffect(() => {
-    try { setTasks(JSON.parse(localStorage.getItem("zeus-workspace-tasks") || "[]")); } catch {}
+    try {
+      setTasks(JSON.parse(localStorage.getItem("zeus-workspace-tasks") || "[]"));
+      setBridgeUrl(localStorage.getItem("zeus-bridge-url") || "");
+      setBridgeToken(localStorage.getItem("zeus-bridge-token") || "");
+    } catch {}
+    setCredentialsLoaded(true);
   }, []);
   useEffect(() => { localStorage.setItem("zeus-workspace-tasks", JSON.stringify(tasks)); }, [tasks]);
+  useEffect(() => {
+    if (!credentialsLoaded) return;
+    localStorage.setItem("zeus-bridge-url", bridgeUrl);
+    localStorage.setItem("zeus-bridge-token", bridgeToken);
+  }, [credentialsLoaded, bridgeUrl, bridgeToken]);
 
   const projectOptions = useMemo(() => projects.map((p, i) => ({
     key: String(p.id || p.worktree || p.name || i),
@@ -182,11 +193,11 @@ export default function Home() {
       {showSettings && <section className="connection-card">
         <div className="card-title"><div><span className="kicker">01 / CONNECTION</span><h2>OpenCode bridge</h2><p>Dashboard ini mengendalikan OpenCode melalui companion bridge lokal. Xingchi tetap digunakan dari konfigurasi provider resmi OpenCode.</p></div><span className={connected ? "pill good" : "pill"}>{connected ? "CONNECTED" : "NOT CONNECTED"}</span></div>
         <div className="connection-fields">
-          <label>BRIDGE ADDRESS<input value={bridgeUrl} onChange={e => setBridgeUrl(e.target.value)} placeholder="http://127.0.0.1:4173"/></label>
-          <label>BRIDGE TOKEN<input type="password" value={bridgeToken} onChange={e => setBridgeToken(e.target.value)} placeholder="Token dari .env lokal" autoComplete="off"/></label>
+          <label>BRIDGE ADDRESS<input value={bridgeUrl} onChange={e => setBridgeUrl(e.target.value)} placeholder="https://your-tunnel.trycloudflare.com" autoComplete="url"/></label>
+          <label>BRIDGE TOKEN<input type="password" value={bridgeToken} onChange={e => setBridgeToken(e.target.value)} placeholder="Token dari .env VPS" autoComplete="new-password"/></label>
           <button className="primary" onClick={connect} disabled={!!busy}>{busy === "connect" ? <LoaderCircle className="spin" size={16}/> : <Wifi size={16}/>} Connect</button>
         </div>
-        <div className="hint"><ShieldCheck size={14}/> API Key Xingchi tidak dimasukkan ke Zeus. Simpan dan konfigurasikan key melalui mekanisme resmi OpenCode.</div>
+        <div className="hint"><ShieldCheck size={14}/> Alamat dan token bridge otomatis disimpan di browser ini. API Key Xingchi tetap dikonfigurasikan melalui OpenCode.</div>
       </section>}
 
       <div className="layout">
