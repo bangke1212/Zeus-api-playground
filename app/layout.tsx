@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Zeus API Playground",
-  description: "Test API endpoints, models, parameters, and integrations in one workspace.",
+  title: "Zeus AI Coding Workspace",
+  description: "Local-first coding agent workspace powered by OpenCode.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
