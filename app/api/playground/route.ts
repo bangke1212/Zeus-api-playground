@@ -103,7 +103,8 @@ export async function POST(request: NextRequest) {
         headers,
         body: JSON.stringify({ model: body.model, messages: body.messages, temperature, max_tokens: maxTokens, stream: false }),
         cache: "no-store",
-        signal: AbortSignal.timeout(60000),\n        redirect: "manual",
+        signal: AbortSignal.timeout(60000),
+        redirect: "manual",
       });
     }
     const text = await upstream.text();
