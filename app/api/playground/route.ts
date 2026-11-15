@@ -27,7 +27,7 @@ function isPrivateIPv6(ip: string) {
   const value = ip.toLowerCase();
   return value === "::1" || value === "::" || value.startsWith("fe80:") ||
     value.startsWith("fc") || value.startsWith("fd") || value.startsWith("::ffff:127.") ||
-    value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
+    value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.") || value.startsWith("::ffff:172.");
 }
 
 async function validateBaseUrl(raw: string) {
@@ -36,7 +36,7 @@ async function validateBaseUrl(raw: string) {
   if (url.protocol !== "https:") throw new Error("Endpoint harus menggunakan HTTPS.");
   if (url.username || url.password) throw new Error("Jangan menaruh kredensial di URL.");
   if (url.search || url.hash) throw new Error("Base URL tidak boleh memiliki query atau fragment.");
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/^\\[|\\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host === "metadata.google.internal") {
     throw new Error("Host lokal/internal tidak diizinkan.");
   }
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     };
     let upstream: Response;
     if (action === "models") {
-      upstream = await fetch(target, { method: "GET", headers, cache: "no-store", signal: AbortSignal.timeout(30000) });
+      upstream = await fetch(target, { method: "GET", headers, cache: "no-store", signal: AbortSignal.timeout(30000), redirect: "manual" });
     } else {
       if (typeof body.model !== "string" || !body.model.trim()) {
         return NextResponse.json({ error: "Model ID wajib diisi." }, { status: 400 });
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
         headers,
         body: JSON.stringify({ model: body.model, messages: body.messages, temperature, max_tokens: maxTokens, stream: false }),
         cache: "no-store",
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(60000),\n        redirect: "manual",
       });
     }
     const text = await upstream.text();
