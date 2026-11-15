@@ -43,6 +43,10 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState("");
   const [showSettings, setShowSettings] = useState(true);
   const [activeView, setActiveView] = useState<"chat" | "files" | "tasks">("chat");
+  const [models, setModels] = useState<Array<{ providerID: string; modelID: string; name: string }>>([]);
+  const [activeModel, setActiveModel] = useState("");
+  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+  const [providerPanel, setProviderPanel] = useState(false);
 
   useEffect(() => {
     try {
@@ -130,7 +134,10 @@ export default function Home() {
     setBusy("send"); setConversation(prev => [...prev, { role: "user", text }]); setPrompt("");
     try {
       const data = await api("/opencode/session/" + encodeURIComponent(session) + "/message" + (project ? "?directory=" + encodeURIComponent(project) : ""), {
-        method: "POST", body: JSON.stringify({ parts: [{ type: "text", text }] }),
+        method: "POST", body: JSON.stringify({
+          parts: [{ type: "text", text }],
+          ...(activeModel ? { model: { providerID: activeModel.split("/")[0], modelID: activeModel.split("/").slice(1).join("/") } } : {}),
+        }),
       });
       const parts = data?.parts || data?.message?.parts || [];
       const answer = parts.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n") || pretty(data);
@@ -200,6 +207,20 @@ export default function Home() {
         <div className="hint"><ShieldCheck size={14}/> Alamat dan token bridge otomatis disimpan di browser ini. API Key Xingchi tetap dikonfigurasikan melalui OpenCode.</div>
       </section>}
 
+      {connected && <section className="connection-card provider-card">
+        <div className="card-title"><div><span className="kicker">02 / AI PROVIDERS</span><h2>Model & API key manager</h2><p>Pilih model dari katalog OpenCode. Kredensial tetap dikelola di VPS oleh OpenCode dan tidak disimpan di browser.</p></div><button className="secondary" onClick={() => setProviderPanel(v => !v)}><Settings2 size={14}/>{providerPanel ? "Hide details" : "Manage providers"}</button></div>
+        <div className="provider-summary">
+          <div><b>{models.length}</b><span>Available models</span></div>
+          <div><b>{connectedProviders.length}</b><span>Connected providers</span></div>
+          <div><b>{connectedProviders.join(", ") || "None reported"}</b><span>Provider credentials</span></div>
+        </div>
+        {providerPanel && <div className="provider-help">
+          <strong>Secure API key setup</strong>
+          <p>Untuk menambah atau mengganti API key, buka terminal VPS lalu jalankan OpenCode TUI dan perintah <code>/connect</code>. Pilih provider (atau Other untuk Xingchi), lalu masukkan key di terminal VPS. Jangan masukkan key ke chat atau browser Zeus.</p>
+          <p>Custom provider seperti Xingchi memerlukan Base URL dan model ID yang benar di konfigurasi OpenCode. Setelah disimpan, tekan Refresh / reconnect di Zeus agar model yang tersedia dimuat ulang.</p>
+          <div className="provider-list">{connectedProviders.map(provider => <span key={provider} className="pill good">{provider}</span>)}</div>
+        </div>}
+      </section>}
       <div className="layout">
         <aside className="sidebar">
           <div className="side-heading">WORKSPACE</div>
@@ -219,6 +240,7 @@ export default function Home() {
             <div className="section-head"><div><span className="kicker">02 / AGENT</span><h2>AI coding session</h2><p>Prompt dikirim ke sesi OpenCode aktif, bukan ke endpoint chat pihak ketiga.</p></div><button className="secondary" onClick={() => loadSessions(project)} disabled={!connected}><RefreshCw size={14}/> Refresh</button></div>
             <div className="chat-card">
               <div className="chat-toolbar"><span><span className="dot online"/> {session ? "SESSION " + session.slice(0,12) : "NO SESSION SELECTED"}</span><span>OPENCode SERVER</span></div>
+              <div className="model-toolbar"><label>CODING MODEL<select value={activeModel} onChange={e => setActiveModel(e.target.value)} disabled={!connected || models.length === 0}><option value="">{models.length ? "Use OpenCode default" : "Connect to load models"}</option>{models.map(m => <option key={m.providerID + "/" + m.modelID} value={m.providerID + "/" + m.modelID}>{m.name}</option>)}</select></label><button className="secondary" onClick={async () => { try { const data = await api("/opencode/config/providers"); const ps = Array.isArray(data?.providers) ? data.providers : []; const next = ps.flatMap((p: any) => (Array.isArray(p.models) ? p.models : Object.entries(p.models || {}).map(([key, value]: [string, any]) => ({ id:key, ...value }))).map((m: any) => ({ providerID:String(p.id || p.providerID || ""), modelID:String(m.id || m.modelID || ""), name:String(p.name || p.id || p.providerID || "") + " / " + String(m.name || m.id || m.modelID || "") })).filter((m: any) => m.providerID && m.modelID)); setModels(next); setNotice("Daftar model diperbarui."); } catch (e) { setNotice(e instanceof Error ? e.message : "Gagal memuat model."); } }} disabled={!connected}><RefreshCw size={13}/> Models</button></div>
               <div className="conversation">
                 {conversation.length === 0 ? <div className="welcome"><div className="welcome-icon"><Bot size={27}/></div><h3>Your coding agent is ready.</h3><p>Pilih sesi atau buat sesi baru, lalu kirim instruksi untuk menganalisis atau mengubah project.</p><div className="prompt-grid">{starterPrompts.map(item => <button key={item.name} onClick={() => setPrompt(item.prompt)}><Sparkles size={13}/>{item.name}</button>)}</div></div> : conversation.map((m, i) => <article className={"message " + m.role} key={i}><b>{m.role === "user" ? "YOU" : m.role === "assistant" ? "AGENT" : "SYSTEM"}</b><pre>{m.text}</pre></article>)}
                 {busy === "send" && <div className="working"><LoaderCircle className="spin" size={15}/> Agent is working…</div>}
@@ -231,7 +253,7 @@ export default function Home() {
           {activeView === "files" && <><div className="section-head"><div><span className="kicker">03 / PROJECT</span><h2>File explorer</h2><p>Daftar file dibaca dari workspace OpenCode yang aktif.</p></div><button className="secondary" onClick={() => loadFiles(directory)}><RefreshCw size={14}/> Refresh</button></div><div className="files-layout"><div className="file-list"><div className="file-path"><FolderOpen size={14}/>{directory || project || "Project root"}</div>{directory && <button className="file-row" onClick={() => loadFiles(directory.split("/").slice(0,-1).join("/"))}>↰ ..</button>}{files.map((f,i) => <button className="file-row" key={String(f.path || f.name || i)} onClick={() => openFile(f)}>{f.type === "directory" || f.isDirectory ? <Folder size={15}/> : <FileCode2 size={15}/>}<span>{f.name || f.path}</span></button>)}{files.length === 0 && <p className="muted-text">Tidak ada file atau project belum dipilih.</p>}</div><div className="file-preview"><div className="preview-head"><Code2 size={14}/>{selectedFile || "Select a file"}</div><pre>{fileContent || "File content will appear here."}</pre></div></div></>}
 
           {activeView === "tasks" && <><div className="section-head"><div><span className="kicker">04 / PLANNING</span><h2>Task board</h2><p>Catat pekerjaan coding dan ubah statusnya. Task tersimpan di browser ini.</p></div><button className="primary" onClick={addTask}><Plus size={15}/> Add task</button></div><div className="task-columns">{(["todo","doing","done"] as const).map(status => <section className="task-column" key={status}><h3>{status === "todo" ? "To do" : status === "doing" ? "In progress" : "Done"}<span>{tasks.filter(t => t.status === status).length}</span></h3>{tasks.filter(t => t.status === status).map(t => <article className="task" key={t.id}><strong>{t.title}</strong><textarea value={t.detail} onChange={e => updateTask(t.id,{detail:e.target.value})} placeholder="Notes / acceptance criteria"/><div><select value={t.status} onChange={e => updateTask(t.id,{status:e.target.value as Task["status"]})}><option value="todo">To do</option><option value="doing">In progress</option><option value="done">Done</option></select><button onClick={() => removeTask(t.id)} aria-label="Delete task"><Trash2 size={14}/></button></div></article>)}</section>)}</div></>}
-          <footer className="footer"><span>ZEUS AI CODING WORKSPACE</span><span>LOCAL BRIDGE · OPENCODE</span></footer>
+          <footer className="footer"><span>ZEUS AI CODING WORKSPACE</span><span>LOCAL BRIDGE · OPENCODE · PROVIDER ROUTING</span></footer>
         </section>
       </div>
       {notice && <div className="toast"><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div>}
