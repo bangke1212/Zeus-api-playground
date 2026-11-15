@@ -2,207 +2,228 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity, ArrowDownToLine, ArrowLeftRight, Braces, Check, ChevronDown, CircleHelp,
-  Clock3, Code2, Copy, ExternalLink, Eye, EyeOff, FlaskConical, Globe2, KeyRound,
-  Layers3, LoaderCircle, Play, Plus, RefreshCw, Search, Send, Settings2, ShieldCheck,
-  Sparkles, Terminal, Trash2, X,
+  Activity, Bot, Check, ChevronDown, CircleAlert, Code2, FileCode2, Folder,
+  FolderOpen, GitBranch, ListTodo, LoaderCircle, MessageSquare, Play, Plus,
+  RefreshCw, Send, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Wifi,
+  WifiOff, X,
 } from "lucide-react";
 
-type Message = { role: "system" | "user" | "assistant"; content: string };
-type HistoryItem = { id: string; time: string; model: string; status: number; ms: number; preview: string };
-type Result = { status: number; ms: number; data: unknown; raw: string; ok: boolean };
+type Project = { id?: string; worktree?: string; name?: string; [key: string]: unknown };
+type Session = { id: string; title?: string; time?: { updated?: number; created?: number }; [key: string]: unknown };
+type Task = { id: string; title: string; status: "todo" | "doing" | "done"; detail: string };
+type FileEntry = { name?: string; path?: string; type?: string; isDirectory?: boolean; [key: string]: unknown };
 
-const presets = [
-  { name: "Xingchi AI", url: "https://api.xingchiapi.com/v1", hint: "OpenAI-compatible · akses klien mengikuti kebijakan provider" },
-  { name: "OpenAI", url: "https://api.openai.com/v1", hint: "Official OpenAI API" },
-  { name: "OpenRouter", url: "https://openrouter.ai/api/v1", hint: "Multi-provider gateway" },
-  { name: "Groq", url: "https://api.groq.com/openai/v1", hint: "Fast inference API" },
-  { name: "DeepSeek", url: "https://api.deepseek.com/v1", hint: "DeepSeek API" },
-  { name: "Custom endpoint", url: "", hint: "HTTPS OpenAI-compatible endpoint" },
+const starterPrompts = [
+  { name: "Understand project", prompt: "Analyze this project structure. Explain the architecture, important modules, entry points, and how to run it. Do not modify files." },
+  { name: "Find bugs", prompt: "Review this project for likely bugs, security issues, and reliability problems. Give findings with file paths and severity. Do not modify files yet." },
+  { name: "Implement task", prompt: "Inspect the relevant code, make the requested change, run appropriate checks, and summarize files changed and test results. Task: " },
+  { name: "Write tests", prompt: "Inspect the existing test setup and add focused tests for the requested behavior. Run the tests and report the results. Task: " },
 ];
-const starterMessages: Message[] = [
-  { role: "system", content: "You are a helpful assistant. Answer clearly and accurately." },
-  { role: "user", content: "Hello! Introduce yourself briefly." },
-];
+
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
-const readError = (data: unknown) => {
-  if (data && typeof data === "object") {
-    const item = data as { error?: unknown; message?: unknown };
-    if (typeof item.error === "string") return item.error;
-    if (item.error && typeof item.error === "object" && "message" in item.error) return String((item.error as {message: unknown}).message);
-    if (typeof item.message === "string") return item.message;
-  }
-  return "Request gagal. Periksa endpoint, API Key, dan model.";
-};
+const id = () => crypto.randomUUID();
 
 export default function Home() {
-  const [provider, setProvider] = useState("Xingchi AI");
-  const [baseUrl, setBaseUrl] = useState(presets[0].url);
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState("gpt-6-astra");
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(1024);
-  const [messages, setMessages] = useState<Message[]>(starterMessages);
-  const [result, setResult] = useState<Result | null>(null);
-  const [busy, setBusy] = useState<"models" | "chat" | null>(null);
-  const [activeTab, setActiveTab] = useState<"response" | "request" | "curl">("response");
-  const [models, setModels] = useState<string[]>([]);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [bridgeUrl, setBridgeUrl] = useState("http://127.0.0.1:4173");
+  const [bridgeToken, setBridgeToken] = useState("");
+  const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [project, setProject] = useState("");
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [session, setSession] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [conversation, setConversation] = useState<Array<{ role: string; text: string }>>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [files, setFiles] = useState<FileEntry[]>([]);
+  const [directory, setDirectory] = useState("");
+  const [fileContent, setFileContent] = useState("");
+  const [selectedFile, setSelectedFile] = useState("");
   const [showSettings, setShowSettings] = useState(true);
+  const [activeView, setActiveView] = useState<"chat" | "files" | "tasks">("chat");
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("zeus-playground-settings");
-      if (saved) {
-        const value = JSON.parse(saved);
-        if (typeof value.provider === "string") setProvider(value.provider);
-        if (typeof value.baseUrl === "string") setBaseUrl(value.baseUrl);
-        if (typeof value.model === "string") setModel(value.model);
-        if (typeof value.temperature === "number") setTemperature(value.temperature);
-        if (typeof value.maxTokens === "number") setMaxTokens(value.maxTokens);
-      }
-      const oldHistory = localStorage.getItem("zeus-playground-history");
-      if (oldHistory) setHistory(JSON.parse(oldHistory));
-    } catch { /* Ignore malformed local preferences. */ }
+    try { setTasks(JSON.parse(localStorage.getItem("zeus-workspace-tasks") || "[]")); } catch {}
   }, []);
+  useEffect(() => { localStorage.setItem("zeus-workspace-tasks", JSON.stringify(tasks)); }, [tasks]);
 
-  useEffect(() => {
-    localStorage.setItem("zeus-playground-settings", JSON.stringify({ provider, baseUrl, model, temperature, maxTokens }));
-  }, [provider, baseUrl, model, temperature, maxTokens]);
+  const projectOptions = useMemo(() => projects.map((p, i) => ({
+    key: String(p.id || p.worktree || p.name || i),
+    label: String(p.name || p.worktree || p.id || "Project " + (i + 1)),
+  })), [projects]);
 
-  useEffect(() => {
-    localStorage.setItem("zeus-playground-history", JSON.stringify(history.slice(0, 12)));
-  }, [history]);
+  async function api(path: string, init: RequestInit = {}) {
+    if (!bridgeToken.trim()) throw new Error("Masukkan bridge token terlebih dahulu.");
+    const base = bridgeUrl.replace(/\/+$/, "");
+    const response = await fetch(base + path, {
+      ...init,
+      headers: { "Content-Type": "application/json", "X-Zeus-Token": bridgeToken, ...(init.headers || {}) },
+      cache: "no-store",
+    });
+    const raw = await response.text();
+    let data: any;
+    try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+    if (!response.ok) throw new Error(data?.error || data?.message || "Bridge error " + response.status);
+    return data;
+  }
 
-  const requestBody = useMemo(() => ({
-    model, messages, temperature, max_tokens: maxTokens, stream: false,
-  }), [model, messages, temperature, maxTokens]);
-
-  const chooseProvider = (name: string) => {
-    const preset = presets.find(item => item.name === name);
-    setProvider(name);
-    if (preset?.url) setBaseUrl(preset.url);
-  };
-
-  const copy = async (value: string, label = "Disalin ke clipboard") => {
-    try { await navigator.clipboard.writeText(value); setNotice(label); window.setTimeout(() => setNotice(""), 2400); }
-    catch { setNotice("Clipboard tidak tersedia di browser ini."); }
-  };
-
-  const callApi = async (action: "models" | "chat") => {
-    if (!apiKey.trim()) { setNotice("Masukkan API Key terlebih dahulu."); return; }
-    if (!baseUrl.trim()) { setNotice("Masukkan Base URL terlebih dahulu."); return; }
-    if (action === "chat" && !model.trim()) { setNotice("Masukkan Model ID."); return; }
-    setBusy(action); setNotice("");
-    const started = performance.now();
+  async function connect() {
+    setBusy("connect"); setNotice("");
     try {
-      const response = await fetch("/api/playground", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, baseUrl, apiKey, model, messages, temperature, maxTokens }),
-      });
-      const raw = await response.text();
-      let data: unknown;
-      try { data = JSON.parse(raw); } catch { data = raw; }
-      const ms = Math.round(performance.now() - started);
-      const next: Result = { status: response.status, ms, data, raw, ok: response.ok };
-      setResult(next);
-      setActiveTab("response");
-      if (action === "models" && response.ok && data && typeof data === "object" && Array.isArray((data as {data?: unknown[]}).data)) {
-        const ids = ((data as {data: Array<{id?: string}>}).data).map(item => item.id).filter((id): id is string => typeof id === "string");
-        setModels(ids);
-        if (ids.length) setNotice(`Berhasil memuat ${ids.length} model.`);
-      }
-      setHistory(prev => [{ id: crypto.randomUUID(), time: new Date().toLocaleTimeString("id-ID"), model: action === "models" ? "GET /models" : model, status: response.status, ms, preview: response.ok ? "Request berhasil" : readError(data).slice(0, 100) }, ...prev].slice(0, 12));
-    } catch (error) {
-      const ms = Math.round(performance.now() - started);
-      const data = { error: error instanceof Error ? error.message : "Network error" };
-      setResult({ status: 0, ms, data, raw: pretty(data), ok: false });
-      setActiveTab("response");
-    } finally { setBusy(null); }
-  };
+      await api("/health");
+      const data = await api("/opencode/project");
+      const list = Array.isArray(data) ? data : (data.projects || []);
+      setProjects(list);
+      setProject(String(list[0]?.worktree || list[0]?.id || list[0]?.name || ""));
+      setConnected(true);
+      setNotice("Terhubung ke OpenCode lokal.");
+      await loadSessions(String(list[0]?.worktree || list[0]?.id || list[0]?.name || ""));
+    } catch (e) { setConnected(false); setNotice(e instanceof Error ? e.message : "Gagal terhubung."); }
+    finally { setBusy(""); }
+  }
 
-  const curl = `curl -X POST "${baseUrl.replace(/\/+$/, "")}/chat/completions" \\\n  -H "Authorization: Bearer YOUR_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(requestBody, null, 2).replace(/'/g, "'\\''")}'`;
-  const responseText = result ? (typeof result.data === "string" ? result.data : pretty(result.data)) : "";
-  const addMessage = () => setMessages(prev => [...prev, { role: "user", content: "" }]);
-  const updateMessage = (index: number, patch: Partial<Message>) => setMessages(prev => prev.map((item, i) => i === index ? { ...item, ...patch } : item));
-  const removeMessage = (index: number) => setMessages(prev => prev.filter((_, i) => i !== index));
+  async function loadSessions(directoryValue = project) {
+    try {
+      const suffix = directoryValue ? "?directory=" + encodeURIComponent(directoryValue) : "";
+      const data = await api("/opencode/session" + suffix);
+      const list = Array.isArray(data) ? data : (data.sessions || []);
+      setSessions(list);
+      if (list.length && !list.some((s: Session) => s.id === session)) setSession(list[0].id);
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Gagal memuat sesi."); }
+  }
+
+  async function selectProject(value: string) {
+    setProject(value); setSession(""); setConversation([]); setFiles([]); setSelectedFile("");
+    await loadSessions(value);
+    await loadFiles("");
+  }
+
+  async function newSession() {
+    setBusy("new-session");
+    try {
+      const data = await api("/opencode/session" + (project ? "?directory=" + encodeURIComponent(project) : ""), {
+        method: "POST", body: JSON.stringify({ title: "Zeus workspace session" }),
+      });
+      const created = data?.id ? data : data?.session;
+      if (!created?.id) throw new Error("OpenCode tidak mengembalikan session ID.");
+      setSessions(prev => [created, ...prev]); setSession(created.id); setConversation([]);
+      setNotice("Sesi baru dibuat.");
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Gagal membuat sesi."); }
+    finally { setBusy(""); }
+  }
+
+  async function sendPrompt(text = prompt) {
+    if (!session) { setNotice("Pilih atau buat sesi terlebih dahulu."); return; }
+    if (!text.trim()) return;
+    setBusy("send"); setConversation(prev => [...prev, { role: "user", text }]); setPrompt("");
+    try {
+      const data = await api("/opencode/session/" + encodeURIComponent(session) + "/message" + (project ? "?directory=" + encodeURIComponent(project) : ""), {
+        method: "POST", body: JSON.stringify({ parts: [{ type: "text", text }] }),
+      });
+      const parts = data?.parts || data?.message?.parts || [];
+      const answer = parts.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n") || pretty(data);
+      setConversation(prev => [...prev, { role: "assistant", text: answer }]);
+      await loadSessions(project);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Gagal mengirim prompt.";
+      setConversation(prev => [...prev, { role: "system", text: "Error: " + message }]);
+    } finally { setBusy(""); }
+  }
+
+  async function loadFiles(path: string) {
+    try {
+      const params = new URLSearchParams();
+      if (project) params.set("directory", project);
+      if (path) params.set("path", path);
+      const data = await api("/opencode/file?" + params.toString());
+      const list = Array.isArray(data) ? data : (data.files || []);
+      setFiles(list); setDirectory(path);
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Gagal membaca file."); }
+  }
+
+  async function openFile(file: FileEntry) {
+    const path = String(file.path || file.name || "");
+    if (!path) return;
+    if (file.type === "directory" || file.isDirectory) { await loadFiles(path); return; }
+    try {
+      const params = new URLSearchParams({ path });
+      if (project) params.set("directory", project);
+      const data = await api("/opencode/file/content?" + params.toString());
+      setSelectedFile(path);
+      setFileContent(String(data.content || data.text || data || ""));
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Gagal membuka file."); }
+  }
+
+  function addTask() {
+    const title = window.prompt("Nama task:");
+    if (title?.trim()) setTasks(prev => [{ id: id(), title: title.trim(), detail: "", status: "todo" }, ...prev]);
+  }
+
+  function updateTask(taskId: string, patch: Partial<Task>) {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
+  }
+
+  function removeTask(taskId: string) { setTasks(prev => prev.filter(t => t.id !== taskId)); }
 
   return (
-    <main className="app-shell">
+    <main className="shell">
       <header className="topbar">
-        <a className="brand" href="#"><span className="brand-mark"><ZapIcon /></span><span>ZEUS<span className="brand-muted">.PLAYGROUND</span></span></a>
-        <div className="topbar-center"><span className="live-dot" /> API WORKSPACE <span className="topbar-divider">/</span> REST CLIENT</div>
-        <div className="topbar-right"><span className="secure-label"><ShieldCheck size={13}/> LOCAL KEY SESSION</span><span className="version-pill">v1.0</span></div>
+        <a className="brand" href="#"><span className="brand-icon"><Sparkles size={19}/></span> ZEUS<span className="muted"> / AI WORKSPACE</span></a>
+        <div className="top-status"><span className={connected ? "dot online" : "dot"}/>{connected ? "OPENCODE CONNECTED" : "LOCAL AGENT DISCONNECTED"}</div>
+        <button className="settings-toggle" onClick={() => setShowSettings(v => !v)}><Settings2 size={15}/> Connection <ChevronDown size={14}/></button>
       </header>
 
       <section className="hero">
-        <div className="hero-copy">
-          <div className="eyebrow"><span className="eyebrow-line"/> DEVELOPER TOOLKIT <span className="eyebrow-line"/></div>
-          <h1>API Playground<span className="hero-period">.</span></h1>
-          <p>Eksperimen endpoint, model, dan parameter API dalam satu ruang kerja.</p>
-        </div>
-        <div className="hero-art" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-core"><Braces size={31}/></div><span className="orbit-node node-a"/><span className="orbit-node node-b"/><span className="orbit-node node-c"/></div>
+        <div><div className="eyebrow">DEVELOPER AGENT WORKSPACE</div><h1>Build with your <em>agent.</em></h1><p>Kelola project, sesi coding, file, prompt, dan task melalui OpenCode yang berjalan di komputer kamu.</p></div>
+        <div className="hero-badge"><Bot size={34}/><span>LOCAL-FIRST<br/>AGENT CONTROL</span></div>
       </section>
 
-      <div className="workspace">
+      {showSettings && <section className="connection-card">
+        <div className="card-title"><div><span className="kicker">01 / CONNECTION</span><h2>OpenCode bridge</h2><p>Dashboard ini mengendalikan OpenCode melalui companion bridge lokal. Xingchi tetap digunakan dari konfigurasi provider resmi OpenCode.</p></div><span className={connected ? "pill good" : "pill"}>{connected ? "CONNECTED" : "NOT CONNECTED"}</span></div>
+        <div className="connection-fields">
+          <label>BRIDGE ADDRESS<input value={bridgeUrl} onChange={e => setBridgeUrl(e.target.value)} placeholder="http://127.0.0.1:4173"/></label>
+          <label>BRIDGE TOKEN<input type="password" value={bridgeToken} onChange={e => setBridgeToken(e.target.value)} placeholder="Token dari .env lokal" autoComplete="off"/></label>
+          <button className="primary" onClick={connect} disabled={!!busy}>{busy === "connect" ? <LoaderCircle className="spin" size={16}/> : <Wifi size={16}/>} Connect</button>
+        </div>
+        <div className="hint"><ShieldCheck size={14}/> API Key Xingchi tidak dimasukkan ke Zeus. Simpan dan konfigurasikan key melalui mekanisme resmi OpenCode.</div>
+      </section>}
+
+      <div className="layout">
         <aside className="sidebar">
-          <div className="side-label">WORKSPACE</div>
-          <button className="nav-item active"><FlaskConical size={16}/> API Playground <span className="nav-count">01</span></button>
-          <div className="side-label side-label-spaced">TOOLS</div>
-          <button className="nav-item" onClick={() => { setMessages(starterMessages); setResult(null); }}><RefreshCw size={15}/> Reset request</button>
-          <button className="nav-item" onClick={() => setShowSettings(v => !v)}><Settings2 size={15}/> Configuration <ChevronDown size={14} className={showSettings ? "chevron-open" : ""}/></button>
-          <div className="sidebar-card"><div className="sidebar-card-icon"><ShieldCheck size={16}/></div><strong>Keys stay private.</strong><p>API Key hanya digunakan saat request dan tidak disimpan ke browser storage.</p></div>
-          <div className="sidebar-bottom"><span className="status-ring"/> SYSTEM OPERATIONAL <span className="sidebar-version">ZEUS / 01</span></div>
+          <div className="side-heading">WORKSPACE</div>
+          <label className="project-label">ACTIVE PROJECT<select value={project} onChange={e => selectProject(e.target.value)}><option value="">Select project...</option>{projectOptions.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select></label>
+          <button className="side-action" onClick={newSession} disabled={!connected || !!busy}><Plus size={15}/> New agent session</button>
+          <div className="side-heading spaced">NAVIGATION</div>
+          <button className={activeView === "chat" ? "nav active" : "nav"} onClick={() => setActiveView("chat")}><MessageSquare size={16}/> Agent sessions</button>
+          <button className={activeView === "files" ? "nav active" : "nav"} onClick={() => { setActiveView("files"); loadFiles(""); }}><Folder size={16}/> Project files</button>
+          <button className={activeView === "tasks" ? "nav active" : "nav"} onClick={() => setActiveView("tasks")}><ListTodo size={16}/> Task board <span>{tasks.length}</span></button>
+          <div className="side-heading spaced">SESSIONS</div>
+          <div className="session-list">{sessions.slice(0,12).map(s => <button key={s.id} className={session === s.id ? "session active" : "session"} onClick={() => { setSession(s.id); setConversation([]); }}><Terminal size={13}/><span>{s.title || s.id.slice(0,12)}</span></button>)}</div>
+          <div className="sidebar-foot"><ShieldCheck size={14}/> API key stays in OpenCode</div>
         </aside>
 
-        <section className="main-panel">
-          <div className="panel-heading"><div><div className="section-kicker">01 / CONNECTION</div><h2>Provider setup</h2><p>Hubungkan endpoint API yang ingin kamu uji.</p></div><button className="ghost-button" onClick={() => setShowSettings(v => !v)}><Settings2 size={15}/> {showSettings ? "Hide settings" : "Show settings"}</button></div>
-
-          {showSettings && <div className="config-card">
-            <div className="config-grid">
-              <label className="field"><span className="field-label">PROVIDER PRESET</span><span className="select-wrap"><Globe2 size={15}/><select value={provider} onChange={e => chooseProvider(e.target.value)}>{presets.map(item => <option key={item.name}>{item.name}</option>)}</select><ChevronDown size={14}/></span><small>{presets.find(p => p.name === provider)?.hint}</small></label>
-              <label className="field"><span className="field-label">BASE URL <span className="required">*</span></span><span className="input-wrap"><span className="input-prefix">URL</span><input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" spellCheck={false}/></span><small>Gunakan base URL tanpa /chat/completions.</small></label>
-              <label className="field field-wide"><span className="field-label">API KEY <span className="required">*</span><span className="field-hint">SESSION ONLY · NEVER COMMITTED</span></span><span className="input-wrap"><KeyRound size={15}/><input type={showKey ? "text" : "password"} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Masukkan secret API key..." autoComplete="off"/><button className="icon-button" type="button" onClick={() => setShowKey(v => !v)} aria-label="Toggle API key visibility">{showKey ? <EyeOff size={15}/> : <Eye size={15}/>}</button></span></label>
+        <section className="main">
+          {activeView === "chat" && <>
+            <div className="section-head"><div><span className="kicker">02 / AGENT</span><h2>AI coding session</h2><p>Prompt dikirim ke sesi OpenCode aktif, bukan ke endpoint chat pihak ketiga.</p></div><button className="secondary" onClick={() => loadSessions(project)} disabled={!connected}><RefreshCw size={14}/> Refresh</button></div>
+            <div className="chat-card">
+              <div className="chat-toolbar"><span><span className="dot online"/> {session ? "SESSION " + session.slice(0,12) : "NO SESSION SELECTED"}</span><span>OPENCode SERVER</span></div>
+              <div className="conversation">
+                {conversation.length === 0 ? <div className="welcome"><div className="welcome-icon"><Bot size={27}/></div><h3>Your coding agent is ready.</h3><p>Pilih sesi atau buat sesi baru, lalu kirim instruksi untuk menganalisis atau mengubah project.</p><div className="prompt-grid">{starterPrompts.map(item => <button key={item.name} onClick={() => setPrompt(item.prompt)}><Sparkles size={13}/>{item.name}</button>)}</div></div> : conversation.map((m, i) => <article className={"message " + m.role} key={i}><b>{m.role === "user" ? "YOU" : m.role === "assistant" ? "AGENT" : "SYSTEM"}</b><pre>{m.text}</pre></article>)}
+                {busy === "send" && <div className="working"><LoaderCircle className="spin" size={15}/> Agent is working…</div>}
+              </div>
+              <div className="composer"><textarea value={prompt} onChange={e => setPrompt(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPrompt(); } }} placeholder="Describe the coding task… (Enter to send, Shift+Enter for newline)"/><button className="primary send" onClick={() => sendPrompt()} disabled={!!busy || !session || !prompt.trim()}><Send size={16}/> Send prompt</button></div>
             </div>
-            <div className="config-footer"><span><ShieldCheck size={14}/> Key tidak disimpan setelah refresh halaman.</span><button className="outline-button" onClick={() => callApi("models")} disabled={busy !== null}>{busy === "models" ? <LoaderCircle className="spin" size={15}/> : <Activity size={15}/>} Test connection <ArrowLeftRight size={13}/></button></div>
-          </div>}
+            <div className="prompt-library"><div className="section-head compact"><div><span className="kicker">PROMPT LIBRARY</span><h3>Quick prompts</h3></div></div><div className="prompt-chips">{starterPrompts.map(item => <button key={item.name} onClick={() => setPrompt(item.prompt)}>{item.name}</button>)}</div></div>
+          </>}
 
-          <div className="panel-heading request-heading"><div><div className="section-kicker">02 / REQUEST BUILDER</div><h2>Chat completion</h2><p>Atur model dan parameter sebelum mengirim request.</p></div><span className="method-pill"><span/> POST</span></div>
-          <div className="request-card">
-            <div className="request-topline"><div className="endpoint"><span className="method-mini">POST</span><code>{baseUrl.replace(/\/+$/, "") || "https://api.example.com/v1"}<b>/chat/completions</b></code></div><span className="compat-label">OPENAI-COMPATIBLE</span></div>
-            <div className="model-row">
-              <label className="field model-field"><span className="field-label">MODEL ID</span><span className="input-wrap"><Sparkles size={15}/><input list="model-options" value={model} onChange={e => setModel(e.target.value)} placeholder="provider/model-id"/><datalist id="model-options">{models.map(id => <option key={id} value={id}/>)}</datalist></span>{models.length > 0 && <small>{models.length} model tersedia dari endpoint</small>}</label>
-              <label className="field param-field"><span className="field-label">TEMPERATURE <b>{temperature.toFixed(1)}</b></span><input className="range-input" type="range" min="0" max="2" step="0.1" value={temperature} onChange={e => setTemperature(Number(e.target.value))}/><small>Creativity / randomness</small></label>
-              <label className="field param-field"><span className="field-label">MAX TOKENS <b>{maxTokens.toLocaleString("en-US")}</b></span><input className="number-input" type="number" min="1" max="32768" value={maxTokens} onChange={e => setMaxTokens(Math.max(1, Math.min(32768, Number(e.target.value))))}/></label>
-            </div>
-            <div className="messages-header"><div><span className="field-label">MESSAGES</span><span className="message-count">{messages.length} ITEMS</span></div><button className="text-button" onClick={addMessage}><Plus size={14}/> Add message</button></div>
-            <div className="message-list">{messages.map((item, index) => <div className="message-row" key={index}><select className={`role-select role-${item.role}`} value={item.role} onChange={e => updateMessage(index, { role: e.target.value as Message["role"] })}><option value="system">SYSTEM</option><option value="user">USER</option><option value="assistant">ASSISTANT</option></select><textarea value={item.content} onChange={e => updateMessage(index, { content: e.target.value })} rows={2} placeholder="Tulis isi pesan..."/><button className="icon-button remove-button" onClick={() => removeMessage(index)} aria-label="Remove message"><Trash2 size={14}/></button></div>)}</div>
-            <div className="request-actions"><button className="subtle-button" onClick={() => { setMessages(starterMessages); setModel("gpt-6-astra"); setTemperature(0.7); setMaxTokens(1024); }}><RefreshCw size={14}/> Reset</button><button className="send-button" onClick={() => callApi("chat")} disabled={busy !== null}>{busy === "chat" ? <LoaderCircle size={16} className="spin"/> : <Play size={15} fill="currentColor"/>} Send request <span>↗</span></button></div>
-          </div>
+          {activeView === "files" && <><div className="section-head"><div><span className="kicker">03 / PROJECT</span><h2>File explorer</h2><p>Daftar file dibaca dari workspace OpenCode yang aktif.</p></div><button className="secondary" onClick={() => loadFiles(directory)}><RefreshCw size={14}/> Refresh</button></div><div className="files-layout"><div className="file-list"><div className="file-path"><FolderOpen size={14}/>{directory || project || "Project root"}</div>{directory && <button className="file-row" onClick={() => loadFiles(directory.split("/").slice(0,-1).join("/"))}>↰ ..</button>}{files.map((f,i) => <button className="file-row" key={String(f.path || f.name || i)} onClick={() => openFile(f)}>{f.type === "directory" || f.isDirectory ? <Folder size={15}/> : <FileCode2 size={15}/>}<span>{f.name || f.path}</span></button>)}{files.length === 0 && <p className="muted-text">Tidak ada file atau project belum dipilih.</p>}</div><div className="file-preview"><div className="preview-head"><Code2 size={14}/>{selectedFile || "Select a file"}</div><pre>{fileContent || "File content will appear here."}</pre></div></div></>}
 
-          <div className="panel-heading response-heading"><div><div className="section-kicker">03 / INSPECTOR</div><h2>Response inspector</h2><p>Lihat hasil, payload request, dan contoh cURL.</p></div>{result && <div className="response-meta"><span className={result.ok ? "http-ok" : "http-error"}>{result.status || "ERR"} {result.ok ? "SUCCESS" : "ERROR"}</span><span><Clock3 size={13}/> {result.ms} ms</span></div>}</div>
-          <div className="inspector-card">
-            <div className="tabs"><button className={activeTab === "response" ? "tab active-tab" : "tab"} onClick={() => setActiveTab("response")}><Braces size={14}/> Response</button><button className={activeTab === "request" ? "tab active-tab" : "tab"} onClick={() => setActiveTab("request")}><Code2 size={14}/> Request JSON</button><button className={activeTab === "curl" ? "tab active-tab" : "tab"} onClick={() => setActiveTab("curl")}><Terminal size={14}/> cURL</button><div className="tab-spacer"/>{result && <button className="icon-button" title="Copy output" onClick={() => copy(activeTab === "curl" ? curl : activeTab === "request" ? pretty(requestBody) : responseText)}><Copy size={14}/></button>}{result && <button className="icon-button" title="Download response" onClick={() => { const blob = new Blob([responseText], {type:"application/json"}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "zeus-response.json"; a.click(); URL.revokeObjectURL(a.href); }}><ArrowDownToLine size={14}/></button>}</div>
-            <div className="code-window"><div className="code-window-top"><div className="window-dots"><i/><i/><i/></div><span>{activeTab === "response" ? "response.json" : activeTab === "request" ? "request.json" : "request.sh"}</span><span className="code-language">{activeTab === "curl" ? "BASH" : "JSON"}</span></div>
-              {activeTab === "response" ? result ? <pre className="code-content">{responseText}</pre> : <div className="empty-state"><div className="empty-icon"><Send size={21}/></div><strong>Ready when you are.</strong><p>Kirim request untuk melihat response API di sini.</p><span>AWAITING FIRST REQUEST</span></div> : <pre className="code-content">{activeTab === "request" ? pretty(requestBody) : curl}</pre>}
-            </div>
-          </div>
-
-          <div className="bottom-grid">
-            <section className="history-card"><div className="small-card-heading"><div><div className="section-kicker">ACTIVITY</div><h3>Recent requests</h3></div><span className="history-total">{history.length} / 12</span></div>{history.length ? <div className="history-list">{history.slice(0,5).map(item => <div className="history-item" key={item.id}><span className={item.status >= 200 && item.status < 300 ? "history-status success" : "history-status failed"}/><div className="history-detail"><strong>{item.model}</strong><small>{item.time} · {item.preview}</small></div><span className="history-code">{item.status || "ERR"}</span><span className="history-ms">{item.ms}ms</span></div>)}</div> : <div className="history-empty"><Clock3 size={15}/> Belum ada aktivitas request.</div>}<button className="clear-history" onClick={() => setHistory([])} disabled={!history.length}>Clear history</button></section>
-            <section className="note-card"><div className="note-icon"><CircleHelp size={17}/></div><div><div className="section-kicker">GOOD TO KNOW</div><h3>Provider access matters.</h3><p>API Key valid belum tentu memberi izin untuk semua aplikasi. Jika provider membatasi jenis client, ikuti dokumentasi dan minta akses resmi.</p><a href="https://vercel.com/docs" target="_blank" rel="noreferrer">Vercel deployment docs <ExternalLink size={12}/></a></div></section>
-          </div>
-          <footer className="footer"><span>ZEUS API PLAYGROUND <span>·</span> BUILT FOR DEVELOPERS</span><span><span className="status-ring"/> ALL SYSTEMS READY</span></footer>
+          {activeView === "tasks" && <><div className="section-head"><div><span className="kicker">04 / PLANNING</span><h2>Task board</h2><p>Catat pekerjaan coding dan ubah statusnya. Task tersimpan di browser ini.</p></div><button className="primary" onClick={addTask}><Plus size={15}/> Add task</button></div><div className="task-columns">{(["todo","doing","done"] as const).map(status => <section className="task-column" key={status}><h3>{status === "todo" ? "To do" : status === "doing" ? "In progress" : "Done"}<span>{tasks.filter(t => t.status === status).length}</span></h3>{tasks.filter(t => t.status === status).map(t => <article className="task" key={t.id}><strong>{t.title}</strong><textarea value={t.detail} onChange={e => updateTask(t.id,{detail:e.target.value})} placeholder="Notes / acceptance criteria"/><div><select value={t.status} onChange={e => updateTask(t.id,{status:e.target.value as Task["status"]})}><option value="todo">To do</option><option value="doing">In progress</option><option value="done">Done</option></select><button onClick={() => removeTask(t.id)} aria-label="Delete task"><Trash2 size={14}/></button></div></article>)}</section>)}</div></>}
+          <footer className="footer"><span>ZEUS AI CODING WORKSPACE</span><span>LOCAL BRIDGE · OPENCODE</span></footer>
         </section>
       </div>
-      {notice && <div className="toast"><Check size={15}/>{notice}<button onClick={() => setNotice("")}><X size={13}/></button></div>}
+      {notice && <div className="toast"><span>{notice}</span><button onClick={() => setNotice("")}><X size={14}/></button></div>}
     </main>
   );
-}
-
-function ZapIcon() {
-  return <Sparkles size={19} strokeWidth={2.2}/>;
 }
