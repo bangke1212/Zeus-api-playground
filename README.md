@@ -27,7 +27,7 @@ The local bridge binds to loopback only, requires a random token, restricts brow
 
 ## Run locally
 
-Requirements: Node.js 20+ and OpenCode installed/configured.
+Requirements: Node.js 20.6+ and OpenCode installed/configured.
 
 1. Install dependencies:
 
