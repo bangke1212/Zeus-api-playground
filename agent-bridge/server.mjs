@@ -57,7 +57,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: "Route not found." }));
   }
   const upstreamPath = incoming.pathname.slice("/opencode".length);
-  if (!/^\/(project|session|file|find|command|config|global)(\/|$)/.test(upstreamPath)) {
+  if (!/^\/(project|session|file|find|command|config|global|provider)(\/|$)/.test(upstreamPath)) {
     res.writeHead(403, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: "OpenCode route is not allowed by the local bridge." }));
   }
